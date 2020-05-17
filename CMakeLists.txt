@@ -5,5 +5,3 @@ project(httper)
 add_executable(httper src/main.cpp)
 
 install(TARGETS httper)
-
-target_link_libraries(httper pthread)
