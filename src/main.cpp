@@ -10,18 +10,23 @@
 int main(int argc, char** argv)
 {
 	int port = 27090;
-	if(argc == 1) return 0;
-	if(argc == 3)
-	{
+	[[unlikely]] if (argc == 1) {
+		std::cerr << "Error: No arguments provided. Use as follow: httper filename [port]" << std::endl;
+		return 1;
+	}
+	if (argc == 3) {
 		std::stringstream toint(argv[2]);
 		toint >> port;
 	}
 
 	std::string filename(argv[1]);
-
 	std::ifstream file(filename);
-	if(!file) return 0;
+	[[unlikely]] if (!file) {
+		std::cerr << "Error: No file " << filename << " found." << std::endl;
+		return 2;
+	}
 
+	// Loads the file into memory by putting it in this string
 	std::string filebuffer((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 	filebuffer += "\r\n\0";
 
@@ -30,8 +35,14 @@ int main(int argc, char** argv)
 	std::cout << "Sharing " << filename << " (" << (filebuffer.length() - 3) << " bytes) on localhost:" << port << "..." << std::endl;
 
 	auto host_sock = socket(AF_INET, SOCK_STREAM, 0);
+	[[unlikely]] if (host_sock == -1) {
+		std::cerr << "Error: Socket could not be created." << std::endl;
+		return 3;
+	}
 
 	{
+		// Sets socket options for the system not to block the ports for
+		// subsequent uses
 		int opt(1);
 		setsockopt(host_sock, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
 	}
@@ -41,15 +52,29 @@ int main(int argc, char** argv)
 	host_info.sin_port = htons(port);
 	host_info.sin_addr.s_addr = INADDR_ANY;
 
-	bind(host_sock, reinterpret_cast<sockaddr*>(&host_info), sizeof(host_info));
+	if (bind(host_sock, reinterpret_cast<sockaddr*>(&host_info), sizeof(host_info)) == -1) {
+		std::cerr << "Error: Could not bind socket to port " << port << '.' << std::endl;
+		return 4;
+	}
 
-	listen(host_sock, 3);
+	[[unlikely]] if (listen(host_sock, 3) == -1) {
+		std::cerr << "Error: Could not pot socket to listen." << std::endl;
+		return 5;
+	}
 
 	while(true)
 	{
 		sockaddr_in client_info;
 		auto client_size = sizeof(client_info);
-		auto client_sock = accept(host_sock, reinterpret_cast<sockaddr*>(&client_info), reinterpret_cast<socklen_t*>(&client_size));
+
+		auto client_sock = accept(host_sock,
+				reinterpret_cast<sockaddr*>(&client_info),
+				reinterpret_cast<socklen_t*>(&client_size));
+
+		[[unlikely]] if (client_sock == -1) {
+			std::cerr << "Error: Client could not be accepted." << std::endl;
+			continue;
+		}
 
 		std::cout << "Sending file" << std::endl;
 
