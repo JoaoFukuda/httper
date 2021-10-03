@@ -80,6 +80,7 @@ struct Settings {
 class Server {
 	TCPSocket host_sock;
 	File file;
+	int port;
 
 	std::string build_http_header()
 	{
@@ -104,7 +105,7 @@ class Server {
 	}
 
  public:
-	Server(Settings settings) : file(settings.filename), host_sock()
+	Server(Settings settings) : file(settings.filename), host_sock(), port(settings.port)
 	{
 		sockaddr_in host_info;
 		host_info.sin_family = AF_INET;
@@ -126,6 +127,10 @@ class Server {
 
 	void run()
 	{
+		std::cout << "Sharing " << file.name << " ("
+		          << (file.buffer.size() - 3)
+		          << " bytes) on localhost:" << port << "..." << std::endl;
+
 		while (true) {
 			try {
 				TCPSocket client_sock = accept(host_sock, nullptr, nullptr);
@@ -140,18 +145,11 @@ class Server {
 			}
 		}
 	}
-
-	size_t get_file_size() { return file.buffer.size(); }
 };
 
 int main(int argc, char** argv)
 {
 	Settings args(argc, argv);
 	Server server(args);
-
-	std::cout << "Sharing " << args.filename << " ("
-	          << (server.get_file_size() - 3)
-	          << " bytes) on localhost:" << args.port << "..." << std::endl;
-
 	server.run();
 }
