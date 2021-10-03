@@ -14,7 +14,7 @@ struct File {
 	{
 		std::ifstream file(name);
 		if (!file) {
-			std::cerr << "Error: No file " << filename << " found" << std::endl;
+			std::cerr << "Error: No file " << name << " found" << std::endl;
 			throw(std::runtime_error("std::ifstream()"));
 		}
 
@@ -31,6 +31,15 @@ struct File {
 
 struct TCPSocket {
 	int sock;
+
+	TCPSocket()
+	{
+		sock = socket(AF_INET, SOCK_STREAM, 0);
+
+		int opt = 1;
+		setsockopt(sock, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt,
+		           sizeof(opt));
+	}
 
 	TCPSocket(int a_sock) : sock(a_sock)
 	{
@@ -68,87 +77,81 @@ struct Settings {
 	}
 };
 
-int create_server_socket()
-{
-	int host_sock = socket(AF_INET, SOCK_STREAM, 0);
+class Server {
+	TCPSocket host_sock;
+	File file;
 
-	int opt = 1;
-	setsockopt(host_sock, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt,
-	           sizeof(opt));
+	std::string build_http_header()
+	{
+		std::stringstream buf;
 
-	return host_sock;
-}
+		buf << "HTTP/1.1 200 OK\r\n"
+		    << "Server: HTTPer\r\n"
+		    << "Content-Length: " << (file.buffer.size() - 3) << "\r\n"
+		    << "Content-Disposition: attachment; filename=\"" << file.name
+		    << "\"\r\n"
+		    << "Content-Type: text/plain\r\n\r\n\0";
 
-void setup_server(int host_sock, int port)
-{
-	sockaddr_in host_info;
-	host_info.sin_family = AF_INET;
-	host_info.sin_port = htons(port);
-	host_info.sin_addr.s_addr = INADDR_ANY;
-
-	if (bind(host_sock, reinterpret_cast<sockaddr*>(&host_info),
-	         sizeof(host_info)) == -1) {
-		std::cerr << "Error: Could not bind socket to port " << port << std::endl;
-		throw(std::runtime_error("bind()"));
+		return buf.str();
 	}
 
-	if (listen(host_sock, 3) == -1) {
-		std::cerr << "Error: Could not pot socket to listen" << std::endl;
-		throw(std::runtime_error("listen()"));
+	void give_file_to_client(int client_sock)
+	{
+		std::string header = build_http_header();
+
+		send(client_sock, header.c_str(), header.size(), 0);
+		send(client_sock, file.buffer.c_str(), file.buffer.size() - 2, 0);
 	}
-}
 
-int start_server(int port)
-{
-	int host_sock = create_server_socket();
-	setup_server(host_sock, port);
+ public:
+	Server(Settings settings) : file(settings.filename), host_sock()
+	{
+		sockaddr_in host_info;
+		host_info.sin_family = AF_INET;
+		host_info.sin_port = htons(settings.port);
+		host_info.sin_addr.s_addr = INADDR_ANY;
 
-	return host_sock;
-}
+		if (bind(host_sock, reinterpret_cast<sockaddr*>(&host_info),
+		         sizeof(host_info)) == -1) {
+			std::cerr << "Error: Could not bind socket to port " << settings.port
+			          << std::endl;
+			throw(std::runtime_error("bind()"));
+		}
 
-std::string build_http_header(const File& file)
-{
-	std::stringstream buf;
+		if (listen(host_sock, 3) == -1) {
+			std::cerr << "Error: Could not pot socket to listen" << std::endl;
+			throw(std::runtime_error("listen()"));
+		}
+	}
 
-	buf << "HTTP/1.1 200 OK\r\n"
-	    << "Server: HTTPer\r\n"
-	    << "Content-Length: " << (file.buffer.size() - 3) << "\r\n"
-	    << "Content-Disposition: attachment; filename=\"" << file.name
-	    << "\"\r\n"
-	    << "Content-Type: text/plain\r\n\r\n\0";
+	void run()
+	{
+		while (true) {
+			try {
+				TCPSocket client_sock = accept(host_sock, nullptr, nullptr);
 
-	return buf.str();
-}
+				std::cout << "Sending file" << std::endl;
+				give_file_to_client(client_sock);
+				std::cout << "File sent" << std::endl;
+			}
+			catch (...) {
+				std::cerr << "Error: Client could not be accepted" << std::endl;
+				continue;
+			}
+		}
+	}
 
-void give_file_to_client(int client_sock, const File& file)
-{
-	std::string header = build_http_header(file);
-
-	send(client_sock, header.c_str(), header.size(), 0);
-	send(client_sock, file.buffer.c_str(), file.buffer.size() - 2, 0);
-}
+	size_t get_file_size() { return file.buffer.size(); }
+};
 
 int main(int argc, char** argv)
 {
 	Settings args(argc, argv);
+	Server server(args);
 
-	File file(args.filename);
-	TCPSocket host_sock = start_server(args.port);
-
-	std::cout << "Sharing " << args.filename << " (" << (file.buffer.size() - 3)
+	std::cout << "Sharing " << args.filename << " ("
+	          << (server.get_file_size() - 3)
 	          << " bytes) on localhost:" << args.port << "..." << std::endl;
 
-	while (true) {
-		try {
-			TCPSocket client_sock = accept(host_sock, nullptr, nullptr);
-
-			std::cout << "Sending file" << std::endl;
-			give_file_to_client(client_sock, file);
-			std::cout << "File sent" << std::endl;
-		}
-		catch (...) {
-			std::cerr << "Error: Client could not be accepted" << std::endl;
-			continue;
-		}
-	}
+	server.run();
 }
