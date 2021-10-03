@@ -6,51 +6,71 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-void parse_arguments(int argc, char** argv, int& port, std::string& filename)
-{
-	port = 27090;
+struct File {
+	std::string name;
+	std::string buffer;
 
-	if (argc == 1) {
-		std::cerr << "Error: No arguments provided. Use as follow: httper "
-		             "filename [port]"
-		          << std::endl;
-		throw(std::runtime_error("args"));
+	File(std::string filename) : name(filename)
+	{
+		std::ifstream file(name);
+		if (!file) {
+			std::cerr << "Error: No file " << filename << " found" << std::endl;
+			throw(std::runtime_error("std::ifstream()"));
+		}
+
+		// Loads the file into memory by putting it in this string
+		std::string filebuffer((std::istreambuf_iterator<char>(file)),
+		                       std::istreambuf_iterator<char>());
+		filebuffer += "\r\n";
+
+		file.close();
+
+		buffer = std::move(filebuffer);
 	}
-	else {
-		filename = std::string(argv[1]);
+};
 
-		if (argc == 3) {
-			std::stringstream toint(argv[2]);
-			toint >> port;
+struct TCPSocket {
+	int sock;
+
+	TCPSocket(int a_sock) : sock(a_sock)
+	{
+		if (sock == -1) {
+			std::cerr << "Error: Socket could not be created" << std::endl;
+			throw(std::runtime_error("TCPSocket()"));
 		}
 	}
-}
 
-std::string load_file(const std::string& filename)
-{
-	std::ifstream file(filename);
-	if (!file) {
-		std::cerr << "Error: No file " << filename << " found" << std::endl;
-		throw(std::runtime_error("std::ifstream()"));
+	~TCPSocket() { close(sock); }
+
+	operator const int() const { return sock; }
+};
+
+struct Settings {
+	int port = 27090;
+	std::string filename;
+
+	Settings(int argc, char* argv[])
+	{
+		if (argc == 1) {
+			std::cerr << "Error: No arguments provided. Use as follow: httper "
+			             "filename [port]"
+			          << std::endl;
+			throw(std::runtime_error("Settings()"));
+		}
+		else {
+			filename = std::string(argv[1]);
+
+			if (argc == 3) {
+				std::stringstream toint(argv[2]);
+				toint >> port;
+			}
+		}
 	}
-
-	// Loads the file into memory by putting it in this string
-	std::string filebuffer((std::istreambuf_iterator<char>(file)),
-	                       std::istreambuf_iterator<char>());
-	filebuffer += "\r\n";
-
-	file.close();
-
-	return filebuffer;
-}
+};
 
 int create_server_socket()
 {
-	auto host_sock = socket(AF_INET, SOCK_STREAM, 0);
-	if (host_sock == -1) {
-		std::cerr << "Error: Socket could not be created" << std::endl;
-		throw(std::runtime_error("socket()"));
-	}
+	int host_sock = socket(AF_INET, SOCK_STREAM, 0);
 
 	int opt = 1;
 	setsockopt(host_sock, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt,
@@ -86,54 +106,49 @@ int start_server(int port)
 	return host_sock;
 }
 
-std::string build_http_header(const std::string& filename,
-                              const std::string& filebuffer)
+std::string build_http_header(const File& file)
 {
 	std::stringstream buf;
 
 	buf << "HTTP/1.1 200 OK\r\n"
 	    << "Server: HTTPer\r\n"
-	    << "Content-Length: " << (filebuffer.size() - 3) << "\r\n"
-	    << "Content-Disposition: attachment; filename=\"" << filename << "\"\r\n"
+	    << "Content-Length: " << (file.buffer.size() - 3) << "\r\n"
+	    << "Content-Disposition: attachment; filename=\"" << file.name
+	    << "\"\r\n"
 	    << "Content-Type: text/plain\r\n\r\n\0";
 
 	return buf.str();
 }
 
-void give_file_to_client(int client_sock, const std::string& filename,
-                         const std::string& filebuffer)
+void give_file_to_client(int client_sock, const File& file)
 {
-	std::string header = build_http_header(filename, filebuffer);
+	std::string header = build_http_header(file);
 
 	send(client_sock, header.c_str(), header.size(), 0);
-	send(client_sock, filebuffer.c_str(), filebuffer.size() - 2, 0);
+	send(client_sock, file.buffer.c_str(), file.buffer.size() - 2, 0);
 }
 
 int main(int argc, char** argv)
 {
-	int port;
-	std::string filename;
-	parse_arguments(argc, argv, port, filename);
+	Settings args(argc, argv);
 
-	std::string filebuffer = load_file(filename);
-	int host_sock = start_server(port);
+	File file(args.filename);
+	TCPSocket host_sock = start_server(args.port);
 
-	std::cout << "Sharing " << filename << " (" << (filebuffer.length() - 3)
-	          << " bytes) on localhost:" << port << "..." << std::endl;
+	std::cout << "Sharing " << args.filename << " (" << (file.buffer.size() - 3)
+	          << " bytes) on localhost:" << args.port << "..." << std::endl;
 
 	while (true) {
-		auto client_sock = accept(host_sock, nullptr, nullptr);
-		if (client_sock == -1) {
+		try {
+			TCPSocket client_sock = accept(host_sock, nullptr, nullptr);
+
+			std::cout << "Sending file" << std::endl;
+			give_file_to_client(client_sock, file);
+			std::cout << "File sent" << std::endl;
+		}
+		catch (...) {
 			std::cerr << "Error: Client could not be accepted" << std::endl;
 			continue;
 		}
-
-		std::cout << "Sending file" << std::endl;
-		give_file_to_client(client_sock, filename, filebuffer);
-		std::cout << "File sent" << std::endl;
-
-		close(client_sock);
 	}
-
-	close(host_sock);
 }
