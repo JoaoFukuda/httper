@@ -1,3 +1,6 @@
+#include "network.hpp"
+#include "filesystem.hpp"
+
 #include <arpa/inet.h>
 #include <fstream>
 #include <iostream>
@@ -5,57 +8,6 @@
 #include <string>
 #include <sys/socket.h>
 #include <unistd.h>
-
-struct File {
-	std::string name;
-	std::string buffer;
-
-	File(std::string filename) : name(filename)
-	{
-		std::ifstream file(name);
-		if (!file) {
-			std::cerr << "Error: No file " << name << " found" << std::endl;
-			throw(std::runtime_error("std::ifstream()"));
-		}
-
-		// Loads file into memory
-		std::string filebuffer((std::istreambuf_iterator<char>(file)),
-		                       std::istreambuf_iterator<char>());
-		filebuffer += "\r\n";
-
-		file.close();
-
-		buffer = std::move(filebuffer);
-	}
-};
-
-struct TCPSocket {
-	int sock;
-
-	TCPSocket()
-	{
-		// AF_INET = IPv4; SOCK_STREAM = TCP
-		sock = socket(AF_INET, SOCK_STREAM, 0);
-
-		// Allows for a faster server restart/redeploy
-		int opt = 1;
-		setsockopt(sock, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt,
-		           sizeof(opt));
-	}
-
-	TCPSocket(int a_sock) : sock(a_sock)
-	{
-		if (sock == -1) {
-			std::cerr << "Error: Socket could not be created" << std::endl;
-			throw(std::runtime_error("TCPSocket()"));
-		}
-	}
-
-	~TCPSocket() { close(sock); }
-
-	// Allows for custom implicit conversion to type int
-	operator const int() const { return sock; }
-};
 
 struct Settings {
 	int port = 27090; // Default if no port is defined
