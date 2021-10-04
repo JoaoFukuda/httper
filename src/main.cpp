@@ -18,7 +18,7 @@ struct File {
 			throw(std::runtime_error("std::ifstream()"));
 		}
 
-		// Loads the file into memory by putting it in this string
+		// Loads file into memory
 		std::string filebuffer((std::istreambuf_iterator<char>(file)),
 		                       std::istreambuf_iterator<char>());
 		filebuffer += "\r\n";
@@ -34,8 +34,10 @@ struct TCPSocket {
 
 	TCPSocket()
 	{
+		// AF_INET = IPv4; SOCK_STREAM = TCP
 		sock = socket(AF_INET, SOCK_STREAM, 0);
 
+		// Allows for a faster server restart/redeploy
 		int opt = 1;
 		setsockopt(sock, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt,
 		           sizeof(opt));
@@ -51,11 +53,12 @@ struct TCPSocket {
 
 	~TCPSocket() { close(sock); }
 
+	// Allows for custom implicit conversion to type int
 	operator const int() const { return sock; }
 };
 
 struct Settings {
-	int port = 27090;
+	int port = 27090; // Default if no port is defined
 	std::string filename;
 
 	Settings(int argc, char* argv[])
@@ -70,6 +73,7 @@ struct Settings {
 			filename = std::string(argv[1]);
 
 			if (argc == 3) {
+				// Converts std::string to int
 				std::stringstream buffer(argv[2]);
 				buffer >> port;
 			}
