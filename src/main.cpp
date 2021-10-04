@@ -70,17 +70,17 @@ struct Settings {
 			filename = std::string(argv[1]);
 
 			if (argc == 3) {
-				std::stringstream toint(argv[2]);
-				toint >> port;
+				std::stringstream buffer(argv[2]);
+				buffer >> port;
 			}
 		}
 	}
 };
 
 class Server {
-	TCPSocket host_sock;
-	File file;
-	int port;
+	TCPSocket m_sock;
+	File m_file;
+	int m_port;
 
 	std::string build_http_header()
 	{
@@ -88,38 +88,39 @@ class Server {
 
 		buf << "HTTP/1.1 200 OK\r\n"
 		    << "Server: HTTPer\r\n"
-		    << "Content-Length: " << (file.buffer.size() - 3) << "\r\n"
-		    << "Content-Disposition: attachment; filename=\"" << file.name
+		    << "Content-Length: " << (m_file.buffer.size() - 3) << "\r\n"
+		    << "Content-Disposition: attachment; filename=\"" << m_file.name
 		    << "\"\r\n"
 		    << "Content-Type: text/plain\r\n\r\n\0";
 
 		return buf.str();
 	}
 
-	void give_file_to_client(int client_sock)
+	void send_file(int client_sock)
 	{
 		std::string header = build_http_header();
 
 		send(client_sock, header.c_str(), header.size(), 0);
-		send(client_sock, file.buffer.c_str(), file.buffer.size() - 2, 0);
+		send(client_sock, m_file.buffer.c_str(), m_file.buffer.size() - 2, 0);
 	}
 
  public:
-	Server(Settings settings) : file(settings.filename), host_sock(), port(settings.port)
+	Server(Settings settings) :
+	    m_file(settings.filename), m_sock(), m_port(settings.port)
 	{
-		sockaddr_in host_info;
-		host_info.sin_family = AF_INET;
-		host_info.sin_port = htons(settings.port);
-		host_info.sin_addr.s_addr = INADDR_ANY;
+		sockaddr_in hint;
+		hint.sin_family = AF_INET;
+		hint.sin_port = htons(m_port);
+		hint.sin_addr.s_addr = INADDR_ANY;
 
-		if (bind(host_sock, reinterpret_cast<sockaddr*>(&host_info),
-		         sizeof(host_info)) == -1) {
-			std::cerr << "Error: Could not bind socket to port " << settings.port
+		if (bind(m_sock, reinterpret_cast<sockaddr*>(&hint), sizeof(hint)) ==
+		    -1) {
+			std::cerr << "Error: Could not bind socket to port " << m_port
 			          << std::endl;
 			throw(std::runtime_error("bind()"));
 		}
 
-		if (listen(host_sock, 3) == -1) {
+		if (listen(m_sock, 3) == -1) {
 			std::cerr << "Error: Could not pot socket to listen" << std::endl;
 			throw(std::runtime_error("listen()"));
 		}
@@ -127,16 +128,16 @@ class Server {
 
 	void run()
 	{
-		std::cout << "Sharing " << file.name << " ("
-		          << (file.buffer.size() - 3)
-		          << " bytes) on localhost:" << port << "..." << std::endl;
+		std::cout << "Sharing " << m_file.name << " ("
+		          << (m_file.buffer.size() - 3)
+		          << " bytes) on localhost:" << m_port << "..." << std::endl;
 
 		while (true) {
 			try {
-				TCPSocket client_sock = accept(host_sock, nullptr, nullptr);
+				TCPSocket client_sock = accept(m_sock, nullptr, nullptr);
 
 				std::cout << "Sending file" << std::endl;
-				give_file_to_client(client_sock);
+				send_file(client_sock);
 				std::cout << "File sent" << std::endl;
 			}
 			catch (...) {
